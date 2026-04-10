@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>알파벳-숫자 트레이너</title>
+    <style>
+        :root { --bg: #f4f7f6; --text: #2c3e50; --card: #ffffff; --primary: #3498db; --accent: #e67e22; }
+        body.dark { --bg: #121212; --text: #e0e0e0; --card: #1e1e1e; --primary: #5dade2; --accent: #f39c12; }
+        
+        body { background-color: var(--bg); color: var(--text); font-family: 'Pretendard', sans-serif; margin: 0; padding: 10px; transition: 0.3s; line-height: 1.6; }
+        .container { max-width: 500px; margin: 0 auto; }
+        
+        /* 공통 카드 스타일 */
+        .card { background: var(--card); padding: 15px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        
+        /* 암기표 레이아웃 (모바일 대응) */
+        .table-section { overflow: hidden; transition: max-height 0.3s ease-out; }
+        .table-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; margin-bottom: 10px; }
+        .table-item { border: 1px solid #ddd; padding: 8px 2px; border-radius: 6px; font-size: 0.9rem; text-align: center; background: rgba(0,0,0,0.02); }
+        body.dark .table-item { border-color: #444; }
+
+        /* 게임 UI */
+        .question-text { font-size: 4rem; font-weight: 800; margin: 15px 0; color: var(--primary); }
+        .input-group { display: flex; gap: 8px; justify-content: center; }
+        input[type="text"], input[type="number"] { 
+            font-size: 1.2rem; padding: 12px; border-radius: 8px; border: 1px solid #ccc; 
+            background: var(--card); color: var(--text); width: 100%; max-width: 150px; 
+        }
+        
+        /* 버튼 디자인 */
+        button { 
+            cursor: pointer; padding: 12px 18px; border: none; border-radius: 8px; 
+            background: var(--primary); color: white; font-weight: bold; font-size: 1rem;
+            transition: transform 0.1s; -webkit-tap-highlight-color: transparent;
+        }
+        button:active { transform: scale(0.95); }
+        button.sub { background: #95a5a6; font-size: 0.8rem; padding: 8px 12px; }
+        button.mode-toggle { position: absolute; top: 10px; right: 10px; padding: 5px 10px; }
+
+        /* 레코드 테이블 모바일 최적화 */
+        .record-container { overflow-x: auto; }
+        table { width: 100%; min-width: 300px; border-collapse: collapse; font-size: 0.85rem; }
+        th, td { border-bottom: 1px solid #ddd; padding: 12px 5px; text-align: center; }
+
+        .feedback { height: 24px; font-weight: bold; margin-bottom: 10px; }
+        .correct { color: #2ecc71; }
+        .wrong { color: #e74c3c; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <button class="mode-toggle sub" onclick="toggleDarkMode()">🌓 다크모드</button>
+    <h2 style="text-align: center; margin-top: 40px;">🔤 알파벳-숫자 암기</h2>
+
+    <div class="card">
+        <button style="width: 100%;" onclick="toggleTable()" id="table-btn">📖 암기표 열기</button>
+        <div id="study-table" class="table-section" style="max-height: 0; margin-top: 0;">
+            </div>
+    </div>
+
+    <div class="card" id="setup-area" style="text-align: center;">
+        <p style="margin-top: 0;">제한 시간(초)</p>
+        <input type="number" id="time-input" value="60" pattern="\d*">
+        <br><br>
+        <button style="width: 100%; padding: 15px;" onclick="startGame()">🎮 게임 시작하기</button>
+    </div>
+
+    <div class="card" id="game-area" style="display:none; text-align: center;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.9rem; opacity: 0.8;">
+            <span id="timer-display">시간: 30</span>
+            <span id="score-display">정답: 0 / 시도: 0</span>
+        </div>
+        <div class="feedback" id="feedback"></div>
+        <div class="question-text" id="question-text">-</div>
+        <div class="input-group">
+            <input type="text" id="answer-input" inputmode="text" placeholder="정답 입력" autocomplete="off">
+            <button onclick="checkAnswer()">확인</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0;">📊 최근 기록</h3>
+            <button class="sub" onclick="clearRecords()">초기화</button>
+        </div>
+        <div class="record-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>일시</th>
+                        <th>정답</th>
+                        <th>속도(초)</th>
+                        <th>오답률</th>
+                    </tr>
+                </thead>
+                <tbody id="record-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    let score = 0, totalTried = 0, timeLeft = 0, initialTime = 0;
+    let currentAnswer = "", timerInterval;
+
+    // 1. 암기표 생성
+    const studyTable = document.getElementById('study-table');
+    for (let i = 0; i < alphabet.length; i += 5) {
+        const grid = document.createElement('div');
+        grid.className = 'table-grid';
+        const slice = alphabet.slice(i, i + 5);
+        slice.forEach((char, idx) => {
+            const item = document.createElement('div');
+            item.className = 'table-item';
+            item.innerHTML = `<strong>${char}</strong><br>${i + idx + 1}`;
+            grid.appendChild(item);
+        });
+        studyTable.appendChild(grid);
+    }
+
+    // 표 토글 함수 (애니메이션 효과를 위해 max-height 조절)
+    function toggleTable() {
+        const table = document.getElementById('study-table');
+        const btn = document.getElementById('table-btn');
+        if (table.style.maxHeight === '0px' || table.style.maxHeight === '') {
+            table.style.maxHeight = '1000px';
+            table.style.marginTop = '20px';
+            btn.innerText = '🔼 표 닫기';
+        } else {
+            table.style.maxHeight = '0px';
+            table.style.marginTop = '0px';
+            btn.innerText = '📖 암기표 열기';
+        }
+    }
+
+    function toggleDarkMode() {
+        document.body.classList.toggle('dark');
+    }
+
+    // 2. 게임 시작 (표 자동 닫힘 포함)
+    function startGame() {
+        // 표가 열려있다면 닫기
+        const table = document.getElementById('study-table');
+        if (table.style.maxHeight !== '0px') toggleTable();
+
+        score = 0;
+        totalTried = 0;
+        initialTime = parseInt(document.getElementById('time-input').value) || 30;
+        timeLeft = initialTime;
+        
+        document.getElementById('setup-area').style.display = 'none';
+        document.getElementById('game-area').style.display = 'block';
+        document.getElementById('feedback').innerText = "";
+        
+        updateStats();
+        nextQuestion();
+
+        timerInterval = setInterval(() => {
+            timeLeft--;
+            document.getElementById('timer-display').innerText = `시간: ${timeLeft}`;
+            if (timeLeft <= 0) endGame();
+        }, 1000);
+    }
+
+    function nextQuestion() {
+        const idx = Math.floor(Math.random() * 26);
+        if (Math.random() > 0.5) {
+            document.getElementById('question-text').innerText = alphabet[idx];
+            currentAnswer = (idx + 1).toString();
+        } else {
+            document.getElementById('question-text').innerText = idx + 1;
+            currentAnswer = alphabet[idx];
+        }
+        document.getElementById('answer-input').value = "";
+        // 모바일에서는 매번 포커스를 주면 키보드가 강제로 올라오므로 
+        // 사용자 편의에 따라 조절 가능 (여기서는 자동 포커스 유지)
+        document.getElementById('answer-input').focus();
+    }
+
+    function checkAnswer() {
+        const inputEl = document.getElementById('answer-input');
+        const input = inputEl.value.trim().toUpperCase();
+        const feedback = document.getElementById('feedback');
+        
+        if (input === "") return; // 빈 값 방지
+        totalTried++;
+
+        if (input === currentAnswer) {
+            score++;
+            feedback.innerText = "참 잘했어요!";
+            feedback.className = "feedback correct";
+        } else {
+            feedback.innerText = `오답 (정답: ${currentAnswer})`;
+            feedback.className = "feedback wrong";
+        }
+        
+        updateStats();
+        nextQuestion();
+    }
+
+    // 엔터키 지원
+    document.getElementById('answer-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') checkAnswer();
+    });
+
+    function updateStats() {
+        document.getElementById('score-display').innerText = `정답: ${score} / 시도: ${totalTried}`;
+    }
+
+    function endGame() {
+        clearInterval(timerInterval);
+        alert(`종료! 맞춘 개수: ${score}개`);
+        saveRecord();
+        document.getElementById('setup-area').style.display = 'block';
+        document.getElementById('game-area').style.display = 'none';
+        loadRecords();
+    }
+
+    // 기록 관리 로직
+    function saveRecord() {
+        const records = JSON.parse(localStorage.getItem('quiz-records-v2') || '[]');
+        const speed = (score / initialTime).toFixed(2);
+        const wrongRate = totalTried === 0 ? 0 : (((totalTried - score) / totalTried) * 100).toFixed(1);
+        
+        const now = new Date();
+        const dateStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${now.getMinutes()}`;
+        
+        const newRecord = { date: dateStr, total: score, speed: speed, wrong: wrongRate };
+        records.unshift(newRecord);
+        localStorage.setItem('quiz-records-v2', JSON.stringify(records.slice(0, 5)));
+    }
+
+    function loadRecords() {
+        const records = JSON.parse(localStorage.getItem('quiz-records-v2') || '[]');
+        const body = document.getElementById('record-body');
+        body.innerHTML = records.map(r => `
+            <tr>
+                <td>${r.date}</td>
+                <td>${r.total}</td>
+                <td>${r.speed}</td>
+                <td>${r.wrong}%</td>
+            </tr>
+        `).join('');
+    }
+
+    function clearRecords() {
+        if(confirm("기록을 초기화할까요?")) {
+            localStorage.removeItem('quiz-records-v2');
+            loadRecords();
+        }
+    }
+
+    window.onload = loadRecords;
+</script>
+
+</body>
+</html>
